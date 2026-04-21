@@ -3,6 +3,7 @@
 pub mod bloom;
 mod compact;
 pub mod error;
+mod io_retry;
 mod lsm;
 pub mod manifest;
 pub mod sst;

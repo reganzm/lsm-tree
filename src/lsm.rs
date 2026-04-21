@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::compact::{merge_sorted_runs, write_level};
 use crate::error::Result;
+use crate::io_retry::remove_file_retry;
 use crate::manifest::Manifest;
 use crate::sst::{SstMeta, SstReader};
 use crate::wal::Wal;
@@ -56,7 +57,7 @@ impl Lsm {
         let mut mem: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
         let mut mem_bytes = 0usize;
         wal.replay(|k, v| {
-            let klen = k.len();
+            let klen: usize = k.len();
             let vlen = v.len();
             match mem.insert(k, v) {
                 None => mem_bytes += klen + vlen,
@@ -130,6 +131,9 @@ impl Lsm {
             return Ok(());
         }
 
+        // 组提交：flush 前一次性 fsync WAL，避免每条 set 都 sync（Windows 上易 PermissionDenied）。
+        self.wal.sync()?;
+
         let rows: Vec<(Vec<u8>, Vec<u8>)> = self.mem.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         self.mem.clear();
         self.mem_bytes = 0;
@@ -151,6 +155,10 @@ impl Lsm {
         let meta = w.finish(id, seq)?;
         self.manifest.levels[0].push(meta.clone().into());
         self.manifest.save(&self.dir)?;
+
+        while self.levels.len() < self.manifest.levels.len() {
+            self.levels.push(Vec::new());
+        }
 
         let reader = SstReader::open(meta)?;
         self.levels[0].push(reader);
@@ -221,7 +229,7 @@ impl Lsm {
         let merged = merge_sorted_runs(runs);
 
         for rec in &self.manifest.levels[level] {
-            let _ = fs::remove_file(self.dir.join(&rec.path));
+            remove_file_retry(self.dir.join(&rec.path))?;
         }
         self.manifest.levels[level].clear();
 

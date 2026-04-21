@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::bloom::Bloom;
 use crate::error::{Error, Result};
+use crate::io_retry::sync_all_retry;
 
 const MAGIC: u32 = 0x4C53_5354; // 'LSST'
 const INDEX_EVERY: usize = 32;
@@ -105,7 +106,7 @@ impl SstWriter {
         self.file.write_all(&bloom_len.to_le_bytes())?;
         self.file.write_all(&index_len.to_le_bytes())?;
         self.file.write_all(&MAGIC.to_le_bytes())?;
-        self.file.sync_all()?;
+        sync_all_retry(&self.file)?;
 
         let size = self.file.metadata()?.len();
         Ok(SstMeta {
